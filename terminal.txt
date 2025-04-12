@@ -5,7 +5,20 @@
 {git clone <-link->} #clone repository on local machine
 
 {cd <-directory name->} #change directory
+{cd ..} #come out of directory
 
 {ls} #shows number of files
 
 {git status} #shows status of git 
+
+{git add <-file name->} #adds new file 
+
+{git commit -m "some message"} #record of changes
+
+{git push origin main} #upload local repo content to remote repo 
+
+{git init} #used to create a new git repository
+
+{mkdir <-file name->} #make new folder
+
+
