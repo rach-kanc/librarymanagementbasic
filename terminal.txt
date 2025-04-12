@@ -1,0 +1,11 @@
+{git --version} #shows version of github connected
+
+{clear} #clears the terminal 
+
+{git clone <-link->} #clone repository on local machine
+
+{cd <-directory name->} #change directory
+
+{ls} #shows number of files
+
+{git status} #shows status of git 
