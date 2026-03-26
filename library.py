@@ -1,10 +1,12 @@
-"""Library management program using Python and MySQL."""
+"""Web-based library management app using Python, MySQL, and Flask."""
+
+from __future__ import annotations
 
 import os
-import sys
-import time
+from contextlib import closing
 
 import mysql.connector as my
+from flask import Flask, jsonify, render_template, request
 
 
 def load_env_file(path=".env"):
@@ -35,439 +37,370 @@ DB_CONFIG = {
 }
 DB_NAME = "library"
 
+BOOK_COLUMNS = [
+    "isbn",
+    "book_title",
+    "author_name",
+    "publisher",
+    "publication_year",
+    "book_type",
+    "language",
+]
+ISSUE_COLUMNS = [
+    "isbn",
+    "book_title",
+    "issuer_name",
+    "date_of_issue",
+    "contact_no",
+]
+RETURN_COLUMNS = [
+    "isbn",
+    "book_title",
+    "issuer_name",
+    "date_of_issue",
+    "date_of_return",
+    "fine",
+    "contact_no",
+]
+
+app = Flask(__name__)
+
 
 def connect_server():
-    """Connect to MySQL server."""
-    try:
-        connection = my.connect(**DB_CONFIG)
-    except my.Error as exc:
-        print(f"Unable to connect to MySQL: {exc}")
-        sys.exit(1)
-
-    if connection.is_connected():
-        print("\t\t****WELCOME TO LIBRARY****")
-        print("\t\t\t\t -MADE BY RACHIT")
-        return connection
-
-    print("Connection not built")
-    sys.exit(1)
+    """Connect to the MySQL server."""
+    return my.connect(**DB_CONFIG)
 
 
-def setup_database(connection, cursor):
-    """Create database and tables if they do not exist."""
-    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
-    cursor.execute(f"USE {DB_NAME}")
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS book (
-            isbn VARCHAR(20) PRIMARY KEY,
-            book_title VARCHAR(100),
-            author_name VARCHAR(100),
-            publisher VARCHAR(100),
-            publication_year INT,
-            book_type VARCHAR(30),
-            language VARCHAR(30)
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS issue (
-            isbn VARCHAR(20) PRIMARY KEY,
-            book_title VARCHAR(100),
-            issuer_name VARCHAR(100),
-            date_of_issue VARCHAR(10),
-            contact_no BIGINT
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS returns (
-            isbn VARCHAR(20) PRIMARY KEY,
-            book_title VARCHAR(100),
-            issuer_name VARCHAR(100),
-            date_of_issue VARCHAR(10),
-            date_of_return VARCHAR(10),
-            fine FLOAT,
-            contact_no BIGINT
-        )
-        """
-    )
-    connection.commit()
+def get_connection():
+    connection = connect_server()
+    connection.database = DB_NAME
+    return connection
 
 
-def pause():
-    time.sleep(1)
+def setup_database():
+    """Create the database and required tables if they do not exist."""
+    with closing(connect_server()) as connection:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
+            cursor.execute(f"USE {DB_NAME}")
 
-
-def fetch_book_by_isbn(cursor, isbn):
-    cursor.execute("SELECT * FROM book WHERE isbn = %s", (isbn,))
-    return cursor.fetchone()
-
-
-def print_rows(rows):
-    if not rows:
-        print("No records found.")
-        return
-
-    for row in rows:
-        print(row)
-
-
-def search_books(cursor):
-    while True:
-        print("__SEARCH BOOKS__")
-        print('ENTER "1" TO SORT BOOKS A-Z')
-        print('ENTER "2" TO SORT BOOKS Z-A')
-        print('ENTER "3" TO GROUP BY BOOK TYPE')
-        print('ENTER "4" TO FILTER BY PUBLICATION YEAR RANGE')
-        print('ENTER "5" TO SEARCH BY ISBN')
-        print('ENTER "6" TO SEARCH BY BOOK TITLE')
-        print('ENTER "7" TO SEARCH BY AUTHOR')
-        print('ENTER "8" TO SEARCH BY PUBLISHER')
-        print('ENTER "9" TO SEARCH BY PUBLICATION YEAR')
-        print('ENTER "10" TO SEARCH BY BOOK TYPE')
-        print('ENTER "11" TO SEARCH BY LANGUAGE')
-        print('ENTER "0" TO GO BACK')
-
-        try:
-            choice = int(input("ENTER YOUR CHOICE (0-11): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
-
-        if choice == 0:
-            return
-        if choice == 1:
-            cursor.execute("SELECT * FROM book ORDER BY book_title")
-        elif choice == 2:
-            cursor.execute("SELECT * FROM book ORDER BY book_title DESC")
-        elif choice == 3:
-            cursor.execute("SELECT * FROM book ORDER BY book_type, book_title")
-        elif choice == 4:
-            print("__SELECT RANGE OF YEAR__")
-            print('ENTER "1" TO SHOW BOOKS PUBLISHED BEFORE YEAR 2000')
-            print('ENTER "2" TO SHOW BOOKS PUBLISHED BETWEEN YEAR 2000 TO 2010')
-            print('ENTER "3" TO SHOW BOOKS PUBLISHED BETWEEN YEAR 2011 TO 2020')
-            print('ENTER "4" TO SHOW BOOKS PUBLISHED AFTER YEAR 2020')
-            try:
-                year_choice = int(input("ENTER YOUR CHOICE (1-4): "))
-            except ValueError:
-                print("ENTER A VALID NUMBER !!")
-                continue
-
-            if year_choice == 1:
-                cursor.execute(
-                    "SELECT * FROM book WHERE publication_year < %s ORDER BY publication_year",
-                    (2000,),
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS book (
+                    isbn VARCHAR(20) PRIMARY KEY,
+                    book_title VARCHAR(100),
+                    author_name VARCHAR(100),
+                    publisher VARCHAR(100),
+                    publication_year INT,
+                    book_type VARCHAR(30),
+                    language VARCHAR(30)
                 )
-            elif year_choice == 2:
-                cursor.execute(
-                    """
-                    SELECT * FROM book
-                    WHERE publication_year BETWEEN %s AND %s
-                    ORDER BY publication_year
-                    """,
-                    (2000, 2010),
-                )
-            elif year_choice == 3:
-                cursor.execute(
-                    """
-                    SELECT * FROM book
-                    WHERE publication_year BETWEEN %s AND %s
-                    ORDER BY publication_year
-                    """,
-                    (2011, 2020),
-                )
-            elif year_choice == 4:
-                cursor.execute(
-                    "SELECT * FROM book WHERE publication_year > %s ORDER BY publication_year",
-                    (2020,),
-                )
-            else:
-                print("ENTER CORRECT CHOICE !!")
-                continue
-        elif choice == 5:
-            isbn = input("ENTER ISBN OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE isbn = %s", (isbn,))
-        elif choice == 6:
-            title = input("ENTER TITLE OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE book_title = %s", (title,))
-        elif choice == 7:
-            author = input("ENTER AUTHOR OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE author_name = %s", (author,))
-        elif choice == 8:
-            publisher = input("ENTER PUBLISHER OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE publisher = %s", (publisher,))
-        elif choice == 9:
-            try:
-                year = int(input("ENTER PUBLICATION YEAR OF BOOK YOU WANT TO SEARCH: "))
-            except ValueError:
-                print("ENTER A VALID YEAR !!")
-                continue
-            cursor.execute("SELECT * FROM book WHERE publication_year = %s", (year,))
-        elif choice == 10:
-            book_type = input("ENTER TYPE OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE book_type = %s", (book_type,))
-        elif choice == 11:
-            language = input("ENTER LANGUAGE OF BOOK YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM book WHERE language = %s", (language,))
-        else:
-            print("ENTER CORRECT CHOICE !!")
-            continue
-
-        pause()
-        print("The books you searched for are:")
-        print_rows(cursor.fetchall())
-
-
-def add_book(connection, cursor):
-    while True:
-        isbn = input("ENTER ISBN OF THE BOOK: ")
-        title = input("ENTER TITLE OF THE BOOK: ")
-        author = input("ENTER AUTHOR OF THE BOOK: ")
-        publisher = input("ENTER PUBLISHER OF THE BOOK: ")
-
-        try:
-            publication_year = int(input("ENTER PUBLICATION YEAR OF THE BOOK: "))
-        except ValueError:
-            print("PUBLICATION YEAR MUST BE A NUMBER.")
-            continue
-
-        book_type = input("ENTER TYPE OF THE BOOK: ")
-        language = input("ENTER LANGUAGE OF THE BOOK: ")
-
-        cursor.execute(
-            """
-            INSERT INTO book (
-                isbn, book_title, author_name, publisher,
-                publication_year, book_type, language
+                """
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (isbn, title, author, publisher, publication_year, book_type, language),
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS issue (
+                    isbn VARCHAR(20) PRIMARY KEY,
+                    book_title VARCHAR(100),
+                    issuer_name VARCHAR(100),
+                    date_of_issue VARCHAR(10),
+                    contact_no BIGINT
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS returns (
+                    isbn VARCHAR(20) PRIMARY KEY,
+                    book_title VARCHAR(100),
+                    issuer_name VARCHAR(100),
+                    date_of_issue VARCHAR(10),
+                    date_of_return VARCHAR(10),
+                    fine FLOAT,
+                    contact_no BIGINT
+                )
+                """
+            )
+
+            # Keep older local databases in sync with the current schema.
+            cursor.execute("ALTER TABLE book MODIFY isbn VARCHAR(20)")
+            cursor.execute("ALTER TABLE issue MODIFY isbn VARCHAR(20)")
+            cursor.execute("ALTER TABLE returns MODIFY isbn VARCHAR(20)")
+            connection.commit()
+
+
+def row_to_dict(columns, row):
+    return {column: row[index] for index, column in enumerate(columns)}
+
+
+def fetch_all(query, params, columns):
+    with closing(get_connection()) as connection:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(query, params)
+            return [row_to_dict(columns, row) for row in cursor.fetchall()]
+
+
+def fetch_one(query, params, columns=None):
+    with closing(get_connection()) as connection:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if columns is None:
+                return row
+            return row_to_dict(columns, row)
+
+
+def execute_write(query, params):
+    with closing(get_connection()) as connection:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(query, params)
+            connection.commit()
+
+
+def parse_json(required_fields):
+    data = request.get_json(silent=True) or {}
+    missing = [field for field in required_fields if str(data.get(field, "")).strip() == ""]
+    if missing:
+        return None, jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
+    return data, None, None
+
+
+def success_response(message, status=200):
+    return jsonify({"message": message}), status
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/books", methods=["GET"])
+def list_books():
+    search = request.args.get("search", "").strip()
+    query = """
+        SELECT isbn, book_title, author_name, publisher,
+               publication_year, book_type, language
+        FROM book
+    """
+    params = ()
+    if search:
+        wildcard = f"%{search}%"
+        query += """
+            WHERE isbn LIKE %s OR book_title LIKE %s OR author_name LIKE %s
+               OR publisher LIKE %s OR book_type LIKE %s OR language LIKE %s
+               OR CAST(publication_year AS CHAR) LIKE %s
+        """
+        params = (wildcard, wildcard, wildcard, wildcard, wildcard, wildcard, wildcard)
+    query += " ORDER BY book_title, isbn"
+    return jsonify(fetch_all(query, params, BOOK_COLUMNS))
+
+
+@app.route("/api/books", methods=["POST"])
+def create_book():
+    data, error_response, status = parse_json(
+        ["isbn", "book_title", "author_name", "publisher", "publication_year", "book_type", "language"]
+    )
+    if error_response:
+        return error_response, status
+
+    existing = fetch_one("SELECT isbn FROM book WHERE isbn = %s", (data["isbn"],))
+    if existing:
+        return jsonify({"error": "A book with this ISBN already exists."}), 409
+
+    execute_write(
+        """
+        INSERT INTO book (
+            isbn, book_title, author_name, publisher,
+            publication_year, book_type, language
         )
-        connection.commit()
-        pause()
-        print("BOOK SUCCESSFULLY ADDED !!")
-
-        if input('DO YOU WANT TO ADD MORE BOOKS? (yes/no): ').strip().lower() != "yes":
-            return
-
-
-def update_book(connection, cursor):
-    while True:
-        isbn = input("ENTER ISBN OF THE BOOK YOU WANT TO UPDATE: ")
-        if not fetch_book_by_isbn(cursor, isbn):
-            print("BOOK NOT FOUND !!")
-            continue
-
-        print('ENTER "1" TO UPDATE BOOK TITLE')
-        print('ENTER "2" TO UPDATE AUTHOR NAME')
-        print('ENTER "3" TO UPDATE PUBLISHER')
-        print('ENTER "4" TO UPDATE PUBLICATION YEAR')
-        print('ENTER "5" TO UPDATE BOOK TYPE')
-        print('ENTER "6" TO UPDATE LANGUAGE')
-
-        try:
-            choice = int(input("ENTER YOUR CHOICE (1-6): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
-
-        if choice == 1:
-            value = input("ENTER UPDATED BOOK TITLE: ")
-            query = "UPDATE book SET book_title = %s WHERE isbn = %s"
-        elif choice == 2:
-            value = input("ENTER UPDATED AUTHOR NAME: ")
-            query = "UPDATE book SET author_name = %s WHERE isbn = %s"
-        elif choice == 3:
-            value = input("ENTER UPDATED PUBLISHER: ")
-            query = "UPDATE book SET publisher = %s WHERE isbn = %s"
-        elif choice == 4:
-            try:
-                value = int(input("ENTER UPDATED PUBLICATION YEAR: "))
-            except ValueError:
-                print("ENTER A VALID YEAR !!")
-                continue
-            query = "UPDATE book SET publication_year = %s WHERE isbn = %s"
-        elif choice == 5:
-            value = input("ENTER UPDATED BOOK TYPE: ")
-            query = "UPDATE book SET book_type = %s WHERE isbn = %s"
-        elif choice == 6:
-            value = input("ENTER UPDATED LANGUAGE: ")
-            query = "UPDATE book SET language = %s WHERE isbn = %s"
-        else:
-            print("ENTER CORRECT CHOICE !!")
-            continue
-
-        cursor.execute(query, (value, isbn))
-        connection.commit()
-        pause()
-        print("SUCCESSFULLY UPDATED !!")
-
-        if input("DO YOU WANT TO UPDATE ANYTHING ELSE? (yes/no): ").strip().lower() != "yes":
-            return
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            data["isbn"],
+            data["book_title"],
+            data["author_name"],
+            data["publisher"],
+            int(data["publication_year"]),
+            data["book_type"],
+            data["language"],
+        ),
+    )
+    return success_response("Book added successfully.", 201)
 
 
-def delete_book(connection, cursor):
-    isbn = input("ENTER ISBN OF THE BOOK YOU WANT TO DELETE: ")
-    pause()
-    print("THE ITEM DELETED CANNOT BE RETRIEVED !!")
-    if input("ARE YOU SURE YOU WANT TO DELETE? (y/n): ").strip().lower() == "y":
-        cursor.execute("DELETE FROM book WHERE isbn = %s", (isbn,))
-        connection.commit()
-        pause()
-        print("BOOK DELETED SUCCESSFULLY !!")
-    else:
-        print("NO ITEM DELETED !!")
+@app.route("/api/books/<isbn>", methods=["PUT"])
+def update_book(isbn):
+    data, error_response, status = parse_json(
+        ["book_title", "author_name", "publisher", "publication_year", "book_type", "language"]
+    )
+    if error_response:
+        return error_response, status
+
+    existing = fetch_one("SELECT isbn FROM book WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Book not found."}), 404
+
+    execute_write(
+        """
+        UPDATE book
+        SET book_title = %s,
+            author_name = %s,
+            publisher = %s,
+            publication_year = %s,
+            book_type = %s,
+            language = %s
+        WHERE isbn = %s
+        """,
+        (
+            data["book_title"],
+            data["author_name"],
+            data["publisher"],
+            int(data["publication_year"]),
+            data["book_type"],
+            data["language"],
+            isbn,
+        ),
+    )
+    return success_response("Book updated successfully.")
 
 
-def issue_book(connection, cursor):
-    pause()
-    print("ENTER THE FOLLOWING DETAILS TO ISSUE A BOOK:")
-    isbn = input("ENTER ISBN OF THE BOOK YOU WANT TO ISSUE: ")
+@app.route("/api/books/<isbn>", methods=["DELETE"])
+def delete_book(isbn):
+    existing = fetch_one("SELECT isbn FROM book WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Book not found."}), 404
 
-    book = fetch_book_by_isbn(cursor, isbn)
+    execute_write("DELETE FROM book WHERE isbn = %s", (isbn,))
+    return success_response("Book deleted successfully.")
+
+
+@app.route("/api/issues", methods=["GET"])
+def list_issues():
+    search = request.args.get("search", "").strip()
+    query = """
+        SELECT isbn, book_title, issuer_name, date_of_issue, contact_no
+        FROM issue
+    """
+    params = ()
+    if search:
+        wildcard = f"%{search}%"
+        query += """
+            WHERE isbn LIKE %s OR book_title LIKE %s OR issuer_name LIKE %s
+               OR date_of_issue LIKE %s OR CAST(contact_no AS CHAR) LIKE %s
+        """
+        params = (wildcard, wildcard, wildcard, wildcard, wildcard)
+    query += " ORDER BY date_of_issue DESC, isbn"
+    return jsonify(fetch_all(query, params, ISSUE_COLUMNS))
+
+
+@app.route("/api/issues", methods=["POST"])
+def create_issue():
+    data, error_response, status = parse_json(["isbn", "issuer_name", "date_of_issue", "contact_no"])
+    if error_response:
+        return error_response, status
+
+    book = fetch_one("SELECT * FROM book WHERE isbn = %s", (data["isbn"],), BOOK_COLUMNS)
     if not book:
-        print("BOOK NOT FOUND IN LIBRARY !!")
-        return
+        return jsonify({"error": "Book not found in library."}), 404
 
-    issuer_name = input("ENTER NAME OF ISSUER: ")
-    date_of_issue = input("ENTER DATE OF ISSUE (YYYY-MM-DD): ")
+    existing = fetch_one("SELECT isbn FROM issue WHERE isbn = %s", (data["isbn"],))
+    if existing:
+        return jsonify({"error": "This book is already issued."}), 409
 
-    try:
-        contact_no = int(input("ENTER CONTACT NUMBER OF THE ISSUER: "))
-    except ValueError:
-        print("CONTACT NUMBER MUST BE NUMERIC.")
-        return
-
-    cursor.execute(
+    execute_write(
         """
         INSERT INTO issue (isbn, book_title, issuer_name, date_of_issue, contact_no)
         VALUES (%s, %s, %s, %s, %s)
         """,
-        (isbn, book[1], issuer_name, date_of_issue, contact_no),
+        (
+            data["isbn"],
+            book["book_title"],
+            data["issuer_name"],
+            data["date_of_issue"],
+            int(data["contact_no"]),
+        ),
     )
-    connection.commit()
-    pause()
-    print("YOU HAVE SUCCESSFULLY ISSUED THE BOOK !!")
-    print("ENJOY READING !!")
+    return success_response("Book issued successfully.", 201)
 
 
-def search_issued_books(cursor):
-    while True:
-        print('ENTER "1" TO SORT BY ISBN')
-        print('ENTER "2" TO SORT BY NAME OF ISSUER')
-        print('ENTER "3" TO SEARCH BY NAME OF ISSUER')
-        print('ENTER "0" TO GO BACK')
+@app.route("/api/issues/<isbn>", methods=["PUT"])
+def update_issue(isbn):
+    data, error_response, status = parse_json(["issuer_name", "date_of_issue", "contact_no"])
+    if error_response:
+        return error_response, status
 
-        try:
-            choice = int(input("ENTER YOUR CHOICE (0-3): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
+    existing = fetch_one("SELECT isbn FROM issue WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Issue record not found."}), 404
 
-        if choice == 0:
-            return
-        if choice == 1:
-            cursor.execute("SELECT * FROM issue ORDER BY isbn")
-        elif choice == 2:
-            cursor.execute("SELECT * FROM issue ORDER BY issuer_name")
-        elif choice == 3:
-            issuer_name = input("ENTER NAME OF ISSUER YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM issue WHERE issuer_name = %s", (issuer_name,))
-        else:
-            print("ENTER CORRECT OPTION !!")
-            continue
-
-        pause()
-        print_rows(cursor.fetchall())
+    execute_write(
+        """
+        UPDATE issue
+        SET issuer_name = %s,
+            date_of_issue = %s,
+            contact_no = %s
+        WHERE isbn = %s
+        """,
+        (
+            data["issuer_name"],
+            data["date_of_issue"],
+            int(data["contact_no"]),
+            isbn,
+        ),
+    )
+    return success_response("Issue record updated successfully.")
 
 
-def update_issue_info(connection, cursor):
-    while True:
-        isbn = input("ENTER ISBN OF THE ISSUED BOOK YOU WANT TO EDIT: ")
+@app.route("/api/issues/<isbn>", methods=["DELETE"])
+def delete_issue(isbn):
+    existing = fetch_one("SELECT isbn FROM issue WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Issue record not found."}), 404
 
-        cursor.execute("SELECT * FROM issue WHERE isbn = %s", (isbn,))
-        if not cursor.fetchone():
-            print("ISSUE RECORD NOT FOUND !!")
-            continue
-
-        print('ENTER "1" TO UPDATE ISSUER NAME')
-        print('ENTER "2" TO UPDATE DATE OF ISSUE')
-        print('ENTER "3" TO UPDATE CONTACT INFO')
-
-        try:
-            choice = int(input("ENTER YOUR CHOICE (1-3): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
-
-        if choice == 1:
-            value = input("ENTER UPDATED ISSUER NAME: ")
-            query = "UPDATE issue SET issuer_name = %s WHERE isbn = %s"
-        elif choice == 2:
-            value = input("ENTER UPDATED DATE OF ISSUE: ")
-            query = "UPDATE issue SET date_of_issue = %s WHERE isbn = %s"
-        elif choice == 3:
-            try:
-                value = int(input("ENTER UPDATED CONTACT NUMBER: "))
-            except ValueError:
-                print("CONTACT NUMBER MUST BE NUMERIC.")
-                continue
-            query = "UPDATE issue SET contact_no = %s WHERE isbn = %s"
-        else:
-            print("ENTER CORRECT CHOICE !!")
-            continue
-
-        cursor.execute(query, (value, isbn))
-        connection.commit()
-        pause()
-        print("SUCCESSFULLY UPDATED !!")
-
-        if input("DO YOU WANT TO UPDATE MORE? (yes/no): ").strip().lower() != "yes":
-            return
+    execute_write("DELETE FROM issue WHERE isbn = %s", (isbn,))
+    return success_response("Issue record deleted successfully.")
 
 
-def delete_issuer(connection, cursor):
-    isbn = input("ENTER ISBN OF THE ISSUED BOOK YOU WANT TO DELETE: ")
-    pause()
-    print("THE ITEM DELETED CANNOT BE RETRIEVED !!")
-    if input("ARE YOU SURE YOU WANT TO DELETE? (y/n): ").strip().lower() == "y":
-        cursor.execute("DELETE FROM issue WHERE isbn = %s", (isbn,))
-        connection.commit()
-        pause()
-        print("ISSUED BOOK RECORD DELETED SUCCESSFULLY !!")
-    else:
-        print("NO ITEM DELETED !!")
+@app.route("/api/returns", methods=["GET"])
+def list_returns():
+    search = request.args.get("search", "").strip()
+    query = """
+        SELECT isbn, book_title, issuer_name, date_of_issue,
+               date_of_return, fine, contact_no
+        FROM returns
+    """
+    params = ()
+    if search:
+        wildcard = f"%{search}%"
+        query += """
+            WHERE isbn LIKE %s OR book_title LIKE %s OR issuer_name LIKE %s
+               OR date_of_issue LIKE %s OR date_of_return LIKE %s
+               OR CAST(fine AS CHAR) LIKE %s OR CAST(contact_no AS CHAR) LIKE %s
+        """
+        params = (wildcard, wildcard, wildcard, wildcard, wildcard, wildcard, wildcard)
+    query += " ORDER BY date_of_return DESC, isbn"
+    return jsonify(fetch_all(query, params, RETURN_COLUMNS))
 
 
-def return_book(connection, cursor):
-    pause()
-    print("ENTER THE FOLLOWING DETAILS TO RETURN A BOOK:")
-    isbn = input("ENTER ISBN OF THE BOOK YOU WANT TO RETURN: ")
+@app.route("/api/returns", methods=["POST"])
+def create_return():
+    data, error_response, status = parse_json(
+        ["isbn", "issuer_name", "date_of_issue", "date_of_return", "fine", "contact_no"]
+    )
+    if error_response:
+        return error_response, status
 
-    cursor.execute("SELECT * FROM issue WHERE isbn = %s", (isbn,))
-    issued_book = cursor.fetchone()
+    issued_book = fetch_one("SELECT * FROM issue WHERE isbn = %s", (data["isbn"],), ISSUE_COLUMNS)
     if not issued_book:
-        print("ISSUE RECORD NOT FOUND !!")
-        return
+        return jsonify({"error": "Issue record not found for this ISBN."}), 404
 
-    issuer_name = input("ENTER NAME OF ISSUER: ")
-    date_of_issue = input("ENTER DATE OF ISSUE (YYYY-MM-DD): ")
-    date_of_return = input("ENTER DATE OF RETURN (YYYY-MM-DD): ")
+    existing = fetch_one("SELECT isbn FROM returns WHERE isbn = %s", (data["isbn"],))
+    if existing:
+        return jsonify({"error": "This return record already exists."}), 409
 
-    try:
-        fine = float(input("ENTER FINE: "))
-        contact_no = int(input("ENTER CONTACT NUMBER OF THE ISSUER: "))
-    except ValueError:
-        print("FINE AND CONTACT NUMBER MUST BE NUMERIC.")
-        return
-
-    cursor.execute(
+    execute_write(
         """
         INSERT INTO returns (
             isbn, book_title, issuer_name, date_of_issue,
@@ -476,227 +409,82 @@ def return_book(connection, cursor):
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            isbn,
-            issued_book[1],
-            issuer_name,
-            date_of_issue,
-            date_of_return,
-            fine,
-            contact_no,
+            data["isbn"],
+            issued_book["book_title"],
+            data["issuer_name"],
+            data["date_of_issue"],
+            data["date_of_return"],
+            float(data["fine"]),
+            int(data["contact_no"]),
         ),
     )
-    connection.commit()
-    pause()
-    print("YOU HAVE SUCCESSFULLY RETURNED THE BOOK !!")
+    return success_response("Book return recorded successfully.", 201)
 
 
-def search_returned_books(cursor):
-    while True:
-        print('ENTER "1" TO SORT BY ISBN')
-        print('ENTER "2" TO SORT BY NAME OF ISSUER')
-        print('ENTER "3" TO SEARCH BY NAME OF ISSUER')
-        print('ENTER "0" TO GO BACK')
+@app.route("/api/returns/<isbn>", methods=["PUT"])
+def update_return(isbn):
+    data, error_response, status = parse_json(
+        ["issuer_name", "date_of_issue", "date_of_return", "fine", "contact_no"]
+    )
+    if error_response:
+        return error_response, status
 
-        try:
-            choice = int(input("ENTER YOUR CHOICE (0-3): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
+    existing = fetch_one("SELECT isbn FROM returns WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Return record not found."}), 404
 
-        if choice == 0:
-            return
-        if choice == 1:
-            cursor.execute("SELECT * FROM returns ORDER BY isbn")
-        elif choice == 2:
-            cursor.execute("SELECT * FROM returns ORDER BY issuer_name")
-        elif choice == 3:
-            issuer_name = input("ENTER NAME OF ISSUER YOU WANT TO SEARCH: ")
-            cursor.execute("SELECT * FROM returns WHERE issuer_name = %s", (issuer_name,))
-        else:
-            print("ENTER CORRECT OPTION !!")
-            continue
-
-        pause()
-        print_rows(cursor.fetchall())
-
-
-def update_return_info(connection, cursor):
-    while True:
-        isbn = input("ENTER ISBN OF THE RETURNED BOOK YOU WANT TO EDIT: ")
-
-        cursor.execute("SELECT * FROM returns WHERE isbn = %s", (isbn,))
-        if not cursor.fetchone():
-            print("RETURN RECORD NOT FOUND !!")
-            continue
-
-        print('ENTER "1" TO UPDATE ISSUER NAME')
-        print('ENTER "2" TO UPDATE DATE OF RETURN')
-        print('ENTER "3" TO UPDATE FINE')
-        print('ENTER "4" TO UPDATE CONTACT INFO')
-
-        try:
-            choice = int(input("ENTER YOUR CHOICE (1-4): "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
-
-        if choice == 1:
-            value = input("ENTER UPDATED ISSUER NAME: ")
-            query = "UPDATE returns SET issuer_name = %s WHERE isbn = %s"
-        elif choice == 2:
-            value = input("ENTER UPDATED DATE OF RETURN: ")
-            query = "UPDATE returns SET date_of_return = %s WHERE isbn = %s"
-        elif choice == 3:
-            try:
-                value = float(input("ENTER UPDATED FINE: "))
-            except ValueError:
-                print("FINE MUST BE NUMERIC.")
-                continue
-            query = "UPDATE returns SET fine = %s WHERE isbn = %s"
-        elif choice == 4:
-            try:
-                value = int(input("ENTER UPDATED CONTACT NUMBER: "))
-            except ValueError:
-                print("CONTACT NUMBER MUST BE NUMERIC.")
-                continue
-            query = "UPDATE returns SET contact_no = %s WHERE isbn = %s"
-        else:
-            print("ENTER CORRECT CHOICE !!")
-            continue
-
-        cursor.execute(query, (value, isbn))
-        connection.commit()
-        pause()
-        print("SUCCESSFULLY UPDATED !!")
-
-        if input("DO YOU WANT TO UPDATE MORE? (yes/no): ").strip().lower() != "yes":
-            return
+    execute_write(
+        """
+        UPDATE returns
+        SET issuer_name = %s,
+            date_of_issue = %s,
+            date_of_return = %s,
+            fine = %s,
+            contact_no = %s
+        WHERE isbn = %s
+        """,
+        (
+            data["issuer_name"],
+            data["date_of_issue"],
+            data["date_of_return"],
+            float(data["fine"]),
+            int(data["contact_no"]),
+            isbn,
+        ),
+    )
+    return success_response("Return record updated successfully.")
 
 
-def delete_return(connection, cursor):
-    isbn = input("ENTER ISBN OF THE RETURNED BOOK YOU WANT TO DELETE: ")
-    pause()
-    print("THE ITEM DELETED CANNOT BE RETRIEVED !!")
-    if input("ARE YOU SURE YOU WANT TO DELETE? (y/n): ").strip().lower() == "y":
-        cursor.execute("DELETE FROM returns WHERE isbn = %s", (isbn,))
-        connection.commit()
-        pause()
-        print("RETURN RECORD DELETED SUCCESSFULLY !!")
-    else:
-        print("NO ITEM DELETED !!")
+@app.route("/api/returns/<isbn>", methods=["DELETE"])
+def delete_return(isbn):
+    existing = fetch_one("SELECT isbn FROM returns WHERE isbn = %s", (isbn,))
+    if not existing:
+        return jsonify({"error": "Return record not found."}), 404
+
+    execute_write("DELETE FROM returns WHERE isbn = %s", (isbn,))
+    return success_response("Return record deleted successfully.")
 
 
-def books_library(connection, cursor):
-    print("***WELCOME TO BOOKS SECTION***")
-    print('ENTER "1" TO SEARCH BOOKS')
-    print('ENTER "2" TO ADD BOOKS')
-    print('ENTER "3" TO UPDATE BOOK INFO')
-    print('ENTER "4" TO DELETE A BOOK')
+@app.route("/api/dashboard", methods=["GET"])
+def dashboard():
+    with closing(get_connection()) as connection:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute("SELECT COUNT(*) FROM book")
+            total_books = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM issue")
+            total_issues = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM returns")
+            total_returns = cursor.fetchone()[0]
 
-    try:
-        choice = int(input("ENTER YOUR CHOICE: "))
-    except ValueError:
-        print("ENTER A VALID NUMBER !!")
-        return
-
-    if choice == 1:
-        search_books(cursor)
-    elif choice == 2:
-        add_book(connection, cursor)
-    elif choice == 3:
-        update_book(connection, cursor)
-    elif choice == 4:
-        delete_book(connection, cursor)
-    else:
-        print("ENTER CORRECT OPTION !!")
-
-
-def books_issue(connection, cursor):
-    print("***WELCOME TO BOOK ISSUE SECTION***")
-    print('ENTER "1" TO ISSUE A BOOK')
-    print('ENTER "2" TO SEARCH ISSUER')
-    print('ENTER "3" TO UPDATE BOOK ISSUE INFO')
-    print('ENTER "4" TO DELETE AN ISSUE RECORD')
-
-    try:
-        choice = int(input("ENTER YOUR CHOICE: "))
-    except ValueError:
-        print("ENTER A VALID NUMBER !!")
-        return
-
-    if choice == 1:
-        issue_book(connection, cursor)
-    elif choice == 2:
-        search_issued_books(cursor)
-    elif choice == 3:
-        update_issue_info(connection, cursor)
-    elif choice == 4:
-        delete_issuer(connection, cursor)
-    else:
-        print("ENTER CORRECT OPTION !!")
-
-
-def books_returned(connection, cursor):
-    print("***WELCOME TO BOOK RETURN SECTION***")
-    print('ENTER "1" TO RETURN A BOOK')
-    print('ENTER "2" TO SEARCH RETURN INFO')
-    print('ENTER "3" TO UPDATE RETURN INFO')
-    print('ENTER "4" TO DELETE RETURN INFO')
-
-    try:
-        choice = int(input("ENTER YOUR CHOICE: "))
-    except ValueError:
-        print("ENTER A VALID NUMBER !!")
-        return
-
-    if choice == 1:
-        return_book(connection, cursor)
-    elif choice == 2:
-        search_returned_books(cursor)
-    elif choice == 3:
-        update_return_info(connection, cursor)
-    elif choice == 4:
-        delete_return(connection, cursor)
-    else:
-        print("ENTER CORRECT OPTION !!")
-
-
-def main():
-    connection = connect_server()
-    cursor = connection.cursor()
-    setup_database(connection, cursor)
-
-    try:
-        keep_running = "yes"
-        while keep_running == "yes":
-            print("WHAT WOULD YOU LIKE TO DO HERE ??")
-            print('ENTER "1" TO VIEW BOOKS')
-            print('ENTER "2" TO ISSUE BOOKS')
-            print('ENTER "3" TO RETURN BOOKS')
-
-            try:
-                choice = int(input("ENTER YOUR CHOICE: "))
-            except ValueError:
-                print("ENTER A VALID NUMBER !!")
-                continue
-
-            if choice == 1:
-                books_library(connection, cursor)
-            elif choice == 2:
-                books_issue(connection, cursor)
-            elif choice == 3:
-                books_returned(connection, cursor)
-            else:
-                print("ENTER CORRECT CHOICE !!")
-
-            keep_running = input("DO YOU WANT TO DO SOMETHING ELSE? (yes/no): ").strip().lower()
-    except EOFError:
-        print("\nINPUT CLOSED. EXITING PROGRAM.")
-    finally:
-        print("\t\t\t****THANKS FOR VISITING****")
-        cursor.close()
-        connection.close()
+    return jsonify(
+        {
+            "total_books": total_books,
+            "total_issues": total_issues,
+            "total_returns": total_returns,
+        }
+    )
 
 
 if __name__ == "__main__":
-    main()
+    setup_database()
+    app.run(debug=True)
