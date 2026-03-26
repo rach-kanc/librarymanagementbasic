@@ -644,33 +644,36 @@ def main():
     cursor = connection.cursor()
     setup_database(connection, cursor)
 
-    keep_running = "yes"
-    while keep_running == "yes":
-        print("WHAT WOULD YOU LIKE TO DO HERE ??")
-        print('ENTER "1" TO VIEW BOOKS')
-        print('ENTER "2" TO ISSUE BOOKS')
-        print('ENTER "3" TO RETURN BOOKS')
+    try:
+        keep_running = "yes"
+        while keep_running == "yes":
+            print("WHAT WOULD YOU LIKE TO DO HERE ??")
+            print('ENTER "1" TO VIEW BOOKS')
+            print('ENTER "2" TO ISSUE BOOKS')
+            print('ENTER "3" TO RETURN BOOKS')
 
-        try:
-            choice = int(input("ENTER YOUR CHOICE: "))
-        except ValueError:
-            print("ENTER A VALID NUMBER !!")
-            continue
+            try:
+                choice = int(input("ENTER YOUR CHOICE: "))
+            except ValueError:
+                print("ENTER A VALID NUMBER !!")
+                continue
 
-        if choice == 1:
-            books_library(connection, cursor)
-        elif choice == 2:
-            books_issue(connection, cursor)
-        elif choice == 3:
-            books_returned(connection, cursor)
-        else:
-            print("ENTER CORRECT CHOICE !!")
+            if choice == 1:
+                books_library(connection, cursor)
+            elif choice == 2:
+                books_issue(connection, cursor)
+            elif choice == 3:
+                books_returned(connection, cursor)
+            else:
+                print("ENTER CORRECT CHOICE !!")
 
-        keep_running = input("DO YOU WANT TO DO SOMETHING ELSE? (yes/no): ").strip().lower()
-
-    print("\t\t\t****THANKS FOR VISITING****")
-    cursor.close()
-    connection.close()
+            keep_running = input("DO YOU WANT TO DO SOMETHING ELSE? (yes/no): ").strip().lower()
+    except EOFError:
+        print("\nINPUT CLOSED. EXITING PROGRAM.")
+    finally:
+        print("\t\t\t****THANKS FOR VISITING****")
+        cursor.close()
+        connection.close()
 
 
 if __name__ == "__main__":
